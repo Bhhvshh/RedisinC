@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c11 -g
+CFLAGS = -Wall -Wextra -std=c11 -g -D_POSIX_C_SOURCE=200809L
 TARGET = main
 SRCS = main.c miniredis.c tcpserver.c
 
