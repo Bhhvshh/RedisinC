@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <errno.h>
 #include <arpa/inet.h>
 #include <stdlib.h>
 #include <string.h>
@@ -132,8 +133,18 @@ void tcpServer(RedisDB *db){
                 char sendBuffer[BUFFER_SIZE];
                 int bytes = recv(currentFd, buffer, BUFFER_SIZE - 1, 0);
 
-                if (bytes <= 0) {
+                if (bytes == 0) {
                     printf("Client disconnected (fd=%d)\n", currentFd);
+                    epoll_ctl(epollFd, EPOLL_CTL_DEL, currentFd, NULL);
+                    closesocket(currentFd);
+                    continue;
+                }
+
+                if (bytes < 0) {
+                    if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+                        continue;
+                    }
+                    perror("recv failed");
                     epoll_ctl(epollFd, EPOLL_CTL_DEL, currentFd, NULL);
                     closesocket(currentFd);
                     continue;
