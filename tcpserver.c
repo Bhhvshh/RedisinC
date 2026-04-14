@@ -11,6 +11,7 @@
 #include <sys/types.h>
 #include <sys/epoll.h>
 #include <unistd.h> // read(), write(), close()
+#include <poll.h>
 #include "redislikeinc.h"
 #define BUFFER_SIZE 100
 #define PORT 8080
@@ -25,6 +26,42 @@ static int set_non_blocking(int fd){
         return -1;
     }
     return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+}
+
+static int send_all_non_blocking(int fd, const char *buffer, size_t length){
+    size_t totalSent = 0;
+
+    while (totalSent < length) {
+        ssize_t sent = send(fd, buffer + totalSent, length - totalSent, 0);
+
+        if (sent > 0) {
+            totalSent += (size_t)sent;
+            continue;
+        }
+
+        if (sent < 0 && errno == EINTR) {
+            continue;
+        }
+
+        if (sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            struct pollfd pfd;
+            pfd.fd = fd;
+            pfd.events = POLLOUT;
+            pfd.revents = 0;
+
+            while (poll(&pfd, 1, -1) < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                return -1;
+            }
+            continue;
+        }
+
+        return -1;
+    }
+
+    return 0;
 }
 
 void tcpServer(RedisDB *db){
@@ -154,7 +191,12 @@ void tcpServer(RedisDB *db){
                 printf("Received from fd=%d: %s\n", currentFd, buffer);
 
                 execute_command_for_server(db, parse_command(buffer), sendBuffer);
-                send(currentFd, sendBuffer, strlen(sendBuffer), 0);
+                if (send_all_non_blocking(currentFd, sendBuffer, strlen(sendBuffer)) < 0) {
+                    perror("send failed");
+                    epoll_ctl(epollFd, EPOLL_CTL_DEL, currentFd, NULL);
+                    closesocket(currentFd);
+                    continue;
+                }
             }
         }
     }
